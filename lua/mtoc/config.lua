@@ -10,6 +10,8 @@ M.defaults = {
     -- or a function that returns boolean (true means to EXCLUDE heading)
     exclude = {},
     pattern = "^(#+)%s+(.+)$",
+    -- Maximum depth of headings to include (nil means no limit, 1=# only, 2=# and ##, etc.)
+    max_depth = nil,
   },
 
   -- Config relating to the style and format of the ToC

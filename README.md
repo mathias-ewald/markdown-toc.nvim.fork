@@ -22,7 +22,7 @@ Almost fully replaces vim-markdown-toc, written in 100% lua.
 
 Dog-fooding ;)
 
-<!-- mtoc-start -->
+<!-- mtoc-start max-depth=3 -->
 
 * [Install](#install)
 * [Setup](#setup)

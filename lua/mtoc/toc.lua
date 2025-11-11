@@ -3,6 +3,17 @@ local config = require('mtoc/config')
 local M = {}
 M.link_formatters = {}
 
+---Parse max-depth parameter from fence string
+---@param fence_str string Fence string like "<!-- mtoc-start max-depth=3 -->"
+---@return integer|nil max_depth Parsed max-depth or nil if not found
+function M.parse_max_depth(fence_str)
+  local max_depth = fence_str:match("max%-depth%s*=%s*(%d+)")
+  if max_depth then
+    return tonumber(max_depth)
+  end
+  return nil
+end
+
 
 ---Link formatter based on GitHub Flavoured Markdown
 ---@param existing_headings { [string]: number }
@@ -41,6 +52,14 @@ end
 local function _find_fences(fstart, fend, lines)
   local locations = {}
   local in_code = false
+  -- Build patterns that match the fence text, allowing optional parameters
+  -- Remove the closing " -->" to allow content after fence name
+  local fstart_base = fstart:match("^(.-)%s*%-%->$") or fstart
+  local fstart_pattern = fstart_base:gsub("([%(%)%-])", "%%%1")
+  
+  -- End fence should match exactly (no parameters expected)
+  local fend_pattern = fend:gsub("([%(%)%-])", "%%%1")
+  
   for i, line in ipairs(lines) do
     if locations.start and locations.end_ then
       break
@@ -50,10 +69,11 @@ local function _find_fences(fstart, fend, lines)
       in_code = not in_code
     else
       if not in_code then
-        if string.find(line, fstart, 1, true) then
+        -- For start fence, allow optional parameters after the base fence text
+        if string.find(line, fstart_pattern) then
           locations.start = i
         end
-        if string.find(line, fend, 1, true) then
+        if string.find(line, fend_pattern) then
           locations.end_ = i
         end
       end
@@ -67,12 +87,17 @@ end
 local function _find_fences_same(fence, lines)
   local in_code = false
   local locations = {}
+  -- Build pattern that matches the fence text, allowing optional parameters
+  -- Remove the closing " -->" to allow content after fence name
+  local fence_base = fence:match("^(.-)%s*%-%->$") or fence
+  local fence_pattern = fence_base:gsub("([%(%)%-])", "%%%1")
+  
   for i, line in ipairs(lines) do
     if string.find(line, '^```') then
       in_code = not in_code
     else
       if not in_code then
-        if string.find(line, fence, 1, true) then
+        if string.find(line, fence_pattern) then
           if locations.start then
             locations.end_ = i
             break
@@ -90,20 +115,33 @@ end
 ---@param fstart string   String of fence start
 ---@param fend string     String of fence end
 ---@return table locations `{ start = start_lineno, end_ = end_lineno }`
+---@return integer|nil max_depth Parsed max-depth from fence start
 function M.find_fences(fstart, fend)
   local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local locations
   if fstart ~= fend then
-    return _find_fences(fstart, fend, lines)
+    locations = _find_fences(fstart, fend, lines)
+  else
+    locations = _find_fences_same(fstart, lines)
   end
-  return _find_fences_same(fstart, lines)
+  
+  -- Parse max-depth from the start fence line if found
+  local max_depth = nil
+  if locations.start then
+    max_depth = M.parse_max_depth(lines[locations.start])
+  end
+  
+  return locations, max_depth
 end
 
 ---Returns a list of strings representing the lines of the ToC list.
 ---Calls both link formatter and item formatter based on config.
 ---@param start_from integer|nil The line number before which, headings will be ignored
+---@param max_depth integer|nil Maximum heading depth to include (overrides config)
 ---@return string[] lines List of lines to be inserted as ToC
-function M.gen_toc_list(start_from)
+function M.gen_toc_list(start_from, max_depth)
   start_from = start_from or 0
+  max_depth = max_depth or config.opts.headings.max_depth
   local toc_config = config.opts.toc_list
 
   ---@type string|string[]
@@ -142,6 +180,11 @@ function M.gen_toc_list(start_from)
     end
 
     local depth = #prefix
+
+    -- Skip headings that exceed max_depth
+    if max_depth and depth > max_depth then
+      goto nextline
+    end
 
     if prev_depth + 1 < depth then
       depth = prev_depth + 1

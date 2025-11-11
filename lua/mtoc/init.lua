@@ -8,7 +8,13 @@ local falsey = utils.falsey
 local M = {}
 M.commands = {'insert', 'update', 'remove'}
 
-local function fmt_fence_start(fence) return '<!-- '..fence..' -->' end
+local function fmt_fence_start(fence, max_depth)
+  if max_depth then
+    return '<!-- '..fence..' max-depth='..max_depth..' -->'
+  end
+  return '<!-- '..fence..' -->'
+end
+
 local function fmt_fence_end(fence) return '<!-- '..fence..' -->' end
 
 local function get_fences()
@@ -32,12 +38,13 @@ local function insert_toc(opts)
   local lines = {}
   local fences = get_fences()
   local use_fence = fences.enabled and not opts.disable_fence
+  local max_depth = opts.max_depth
 
-  lines = toc.gen_toc_list(start)
+  lines = toc.gen_toc_list(start, max_depth)
   if empty_or_nil(lines) then
     if use_fence then
       lines = {
-        fmt_fence_start(fences.start_text),
+        fmt_fence_start(fences.start_text, max_depth),
         '',
         fmt_fence_end(fences.end_text),
       }
@@ -53,7 +60,7 @@ local function insert_toc(opts)
       for _ = 1, pad do
         table.insert(lines, 1, '')
       end
-      table.insert(lines, 1, fmt_fence_start(fences.start_text))
+      table.insert(lines, 1, fmt_fence_start(fences.start_text, max_depth))
       for _ = 1, pad do
         table.insert(lines, '')
       end
@@ -68,7 +75,7 @@ local function remove_toc(not_found_ok)
   local fences = get_fences()
   local fstart, fend = fmt_fence_start(fences.start_text), fmt_fence_end(fences.end_text)
 
-  local locations = toc.find_fences(fstart, fend)
+  local locations, max_depth = toc.find_fences(fstart, fend)
   if empty_or_nil(locations) or (falsey(locations.start) and falsey(locations.end_)) then
     if not not_found_ok then
       vim.notify("No fences found!", vim.log.levels.ERROR)
@@ -90,21 +97,22 @@ local function remove_toc(not_found_ok)
 
   utils.delete_lines(locations.start, locations.end_)
 
-  return locations
+  return { locations = locations, max_depth = max_depth }
 end
 
 local function update_toc(opts, fail_ok)
   if opts.range_start and opts.range_end then
     utils.delete_lines(opts.range_start, opts.range_end)
     local use_fence = opts.bang
-    return insert_toc({ line = opts.range_start-1, disable_fence = not use_fence })
+    return insert_toc({ line = opts.range_start-1, disable_fence = not use_fence, max_depth = opts.max_depth })
   end
 
-  local locations = remove_toc(fail_ok)
-  if empty_or_nil(locations) then
+  local result = remove_toc(fail_ok)
+  if empty_or_nil(result) then
     return
   end
-  opts.line = locations.start-1
+  opts.line = result.locations.start-1
+  opts.max_depth = opts.max_depth or result.max_depth
   return insert_toc(opts)
 end
 
@@ -113,13 +121,14 @@ local function update_or_remove_toc(opts)
     return update_toc(opts)
   end
 
-  local locations = remove_toc(true)
+  local result = remove_toc(true)
   opts = opts or {}
-  if empty_or_nil(locations) then
+  if empty_or_nil(result) then
     opts.line = nil
     return insert_toc(opts)
   end
-  opts.line = locations.start-1
+  opts.line = result.locations.start-1
+  opts.max_depth = opts.max_depth or result.max_depth
   return insert_toc(opts)
 end
 
